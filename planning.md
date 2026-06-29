@@ -85,11 +85,20 @@ appeal event (with original decision + creator reasoning) appended to
 |---|--------|------|----------|--------|
 | 1 | **Groq LLM** (`llama-3.3-70b-versatile`) | Semantic | Holistic coherence, originality of phrasing, idiosyncrasy / "voice" | `P(AI) ∈ [0,1]` + rationale |
 | 2 | **Stylometric heuristics** | Structural | Surface statistics: sentence-length burstiness, vocabulary diversity, punctuation | `P(AI) ∈ [0,1]` + raw metrics |
+| 3 | **Input provenance** (behavioral) *(stretch — ensemble)* | Behavioral | *How* text entered the box: typed live vs pasted as a block | `P(AI) ∈ [0,1]` + verdict, **optional** (browser only) |
 
-**Why these two:** they are genuinely independent — one reads *meaning*, the
-other reads *form*. A signal that fools one (e.g. AI text deliberately given
-varied sentence lengths) often won't fool the other. Combining a semantic and a
-structural view is more informative than either alone.
+**Why these signals:** they are genuinely independent — one reads *meaning*, one
+reads *form*, one reads *origin of entry*. A signal that fools one (e.g. AI text
+given varied sentence lengths, or AI text retyped by hand) often won't fool the
+others. Combining semantic + structural + behavioral views is more informative
+than any alone.
+
+**Signal 3 detail & its hard limit:** the browser tracks keystrokes, backspaces,
+paste events, and elapsed time. *Typed live with corrections* → strong human
+provenance; *pasted block* → **weak** provenance, **not** proof of AI (people
+paste their own drafts). So paste only nudges suspicion up; its score is clamped
+to [0.10, 0.65] and capped at 0.25 weight so it can never alone force an "AI"
+verdict. API callers (curl) omit it, so it gracefully drops out.
 
 **Stylometry sub-metrics:**
 - **Burstiness** = coefficient of variation of sentence length. Human prose is
@@ -102,9 +111,14 @@ structural view is more informative than either alone.
 - **Casual-marker discount** (`i`, `ok`, `gonna`, `honestly`, `lol`…): pulls the
   score toward human, protecting informal writers from false AI flags.
 
-**Combining → single confidence:** `p_ai = 0.65·llm_score + 0.35·stylo_score`
-(LLM weighted higher; if the LLM is unavailable, stylometry takes full weight).
-`confidence = max(p_ai, 1-p_ai)` ∈ [0.5, 1.0].
+**Combining → single confidence (ensemble weighting):** base weights
+`llm 0.50 · stylo 0.25 · behavior 0.25`. Any unavailable signal is dropped and
+the rest are **renormalized**, so:
+- all three present → 0.50 / 0.25 / 0.25
+- no behavior (API/curl) → 0.667 / 0.333 (the original two-signal split)
+- no LLM (offline) → stylo/behavior split
+
+`p_ai = Σ(weightᵢ · scoreᵢ) / Σweightᵢ`; `confidence = max(p_ai, 1-p_ai)` ∈ [0.5, 1.0].
 
 **Blind spots (every signal has them):**
 - *LLM:* can be wrong on short text, non-English, or domain jargon; non-deterministic-ish; costs a network call. Can be gamed by paraphrasing.
@@ -192,6 +206,13 @@ structural view is more informative than either alone.
   appeal flips status to `under_review` and writes an audit row with the
   reasoning; rate-limit returns 429 past the cap.
 
-## Stretch (not yet started)
-Ensemble (3rd signal), provenance certificate, analytics dashboard, multi-modal.
+## Stretch
+
+**✅ Ensemble detection (DONE).** Added a 3rd signal — **input provenance**
+(typed-live vs pasted-block, captured in the browser) — combined via documented
+renormalized weighting (`llm 0.50 / stylo 0.25 / behavior 0.25`, see above). It
+gracefully drops out for API callers. Demonstrated: the *same* text scores
+`uncertain` when typed live but `likely_ai` when pasted as a block.
+
+Not started: provenance certificate, analytics dashboard, multi-modal.
 *Update this section before starting any of them.*

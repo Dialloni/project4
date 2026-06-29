@@ -19,7 +19,7 @@ from flask_limiter.util import get_remote_address
 from . import db
 from .labels import build_label
 from .scoring import combine
-from .signals import llm_signal, stylo_signal
+from .signals import behavior_signal, llm_signal, stylo_signal
 
 load_dotenv()
 
@@ -65,7 +65,8 @@ def submit():
 
     llm = llm_signal(text)
     stylo = stylo_signal(text)
-    result = combine(llm, stylo)
+    behavior = behavior_signal(data.get("behavior"))  # optional, browser-only
+    result = combine(llm, stylo, behavior)
     label = build_label(result)
 
     content_id = str(uuid.uuid4())
@@ -77,6 +78,7 @@ def submit():
         "attribution": result["attribution"],
         "confidence": result["confidence"],
         "p_ai": result["p_ai"],
+        "weights_used": result["weights_used"],
         "signals": result["signals"],
         "label": label,
         "status": "classified",

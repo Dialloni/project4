@@ -1,10 +1,16 @@
-"""Combine the two signals into a single calibrated verdict + confidence.
+"""Combine 2–3 independent signals into one calibrated verdict + confidence.
 
-Design choices (documented in planning.md / README):
+Signals (each emits P(AI) in [0,1]):
+  llm       - semantic  (Groq)            base weight 0.50
+  stylo     - structural (stylometry)     base weight 0.25
+  behavior  - input provenance (typed vs  base weight 0.25
+              pasted, captured in browser)
 
-* p_ai = weighted average of the two signals. The LLM carries more weight
-  (0.65) than stylometry (0.35) because it reads meaning, not just surface
-  statistics. If the LLM is unavailable, stylometry takes full weight.
+Behavior is optional: API callers (curl) won't send it, so the scorer drops any
+unavailable signal and renormalizes the remaining weights. With only llm+stylo
+this reduces to the original 0.667/0.333 split.
+
+Design choices (see planning.md):
 
 * False-positive asymmetry: wrongly branding a human's work as AI is the worst
   outcome on a writing platform, so the bar to declare "likely AI" is higher
@@ -12,30 +18,30 @@ Design choices (documented in planning.md / README):
   reported honestly as "uncertain" rather than forced to a side.
 
 * confidence = certainty in the dominant attribution = max(p_ai, 1-p_ai),
-  always in [0.5, 1.0]. This is what the transparency label renders, so 0.51
-  and 0.95 produce visibly different labels.
+  always in [0.5, 1.0]. This is what the label renders, so 0.51 and 0.95 produce
+  visibly different labels.
 """
 
-LLM_WEIGHT = 0.65
-STYLO_WEIGHT = 0.35
+BASE_WEIGHTS = {"llm": 0.50, "stylo": 0.25, "behavior": 0.25}
 
 AI_THRESHOLD = 0.70      # need strong evidence to accuse AI (protects humans)
 HUMAN_THRESHOLD = 0.40   # below this -> likely human
 
 
-def combine(llm, stylo):
-    """llm: dict from llm_signal(); stylo: dict from stylo_signal().
+def combine(llm, stylo, behavior=None):
+    """llm/stylo/behavior: dicts from the signal functions (behavior optional).
 
     Returns a result dict consumed by the endpoint, label builder, and DB.
     """
-    stylo_score = stylo["score"]
-    if llm["available"]:
-        llm_score = llm["score"]
-        p_ai = LLM_WEIGHT * llm_score + STYLO_WEIGHT * stylo_score
-    else:
-        llm_score = None
-        p_ai = stylo_score  # graceful degradation to single signal
+    available = {"stylo": stylo["score"]}  # stylo always available
+    if llm.get("available"):
+        available["llm"] = llm["score"]
+    if behavior and behavior.get("available"):
+        available["behavior"] = behavior["score"]
 
+    # weighted average over available signals, renormalized
+    total_w = sum(BASE_WEIGHTS[k] for k in available)
+    p_ai = sum(BASE_WEIGHTS[k] * v for k, v in available.items()) / total_w
     p_ai = round(p_ai, 4)
 
     if p_ai >= AI_THRESHOLD:
@@ -51,11 +57,19 @@ def combine(llm, stylo):
         "attribution": attribution,
         "confidence": confidence,
         "p_ai": p_ai,
-        "llm_score": llm_score,
-        "stylo_score": stylo_score,
+        "llm_score": available.get("llm"),
+        "stylo_score": stylo["score"],
+        "behavior_score": available.get("behavior"),
+        "weights_used": {k: round(BASE_WEIGHTS[k] / total_w, 3) for k in available},
         "signals": {
-            "llm": {"available": llm["available"], "score": llm_score,
+            "llm": {"available": llm.get("available", False), "score": available.get("llm"),
                     "rationale": llm.get("rationale", "")},
-            "stylometry": {"score": stylo_score, "metrics": stylo["metrics"]},
+            "stylometry": {"score": stylo["score"], "metrics": stylo["metrics"]},
+            "behavior": (
+                {"available": True, "score": behavior["score"], "metrics": behavior["metrics"],
+                 "verdict": behavior["verdict"]}
+                if behavior and behavior.get("available")
+                else {"available": False, "score": None}
+            ),
         },
     }

@@ -90,16 +90,30 @@ call fails, the system falls back to stylometry alone.
 - **Casual-marker discount** (`i`, `ok`, `honestly`, `lol`…) pulls toward human,
   protecting informal writers.
 
-*Why pair them:* one reads meaning, the other reads form — genuinely independent,
-so text that fools one often won't fool the other. *Stylometry blind spots:*
-short text has no sentence variance (looks AI); formal human writing is uniform
-(looks AI); it measures form, never truth.
+**Signal 3 — Input provenance (behavioral, stretch/ensemble, optional).** Reads
+*how* the text entered the box, not its content: keystrokes, backspaces, paste
+events, and elapsed time, captured in the browser. *Typed live with corrections*
+→ strong human provenance; *pasted as a block* → **weak** provenance. Crucially,
+**paste ≠ AI** — people paste their own drafts — so a paste only nudges suspicion
+up; the score is clamped to [0.10, 0.65] and capped at 0.25 weight, never able to
+force an AI verdict alone. API/curl callers omit it and it drops out cleanly.
+*Blind spots:* only available in the browser UI; a determined faker could retype
+AI text (which is exactly why it's weighted low and paired with content signals).
+
+*Why pair them:* each reads a different axis — meaning, form, origin-of-entry —
+genuinely independent, so text that fools one often won't fool the others.
+*Stylometry blind spots:* short text has no sentence variance (looks AI); formal
+human writing is uniform (looks AI); it measures form, never truth.
 
 ## Confidence scoring — how it's combined, validated, and what it means
 
-`p_ai = 0.65·llm_score + 0.35·stylo_score` (LLM weighted higher because it reads
-meaning; stylometry takes full weight if the LLM is unavailable). Attribution
-uses **asymmetric thresholds** so we don't accuse humans on weak evidence:
+**Ensemble weighting:** base weights `llm 0.50 · stylo 0.25 · behavior 0.25`.
+Any unavailable signal is dropped and the rest **renormalized** — so with no
+behavioral data (API/curl) it reduces to `0.667 · llm + 0.333 · stylo`, and
+`p_ai = Σ(weightᵢ·scoreᵢ)/Σweightᵢ`. The LLM carries the most weight because it
+reads meaning; behavioral provenance is capped low because paste ≠ AI.
+Attribution uses **asymmetric thresholds** so we don't accuse humans on weak
+evidence:
 
 | `p_ai` | Attribution |
 |--------|-------------|
@@ -220,6 +234,29 @@ via `GET /log`. Sample entries (trimmed):
 
 Each entry captures timestamp, content ID, attribution, combined confidence, both
 individual signal scores, status, and — for appeals — the creator's reasoning.
+
+## Stretch implemented — Ensemble detection (3 signals)
+
+A third signal, **input provenance**, is layered on top of the two content
+signals and combined with the documented renormalized weighting above. The
+browser records keystrokes, backspaces, paste events, and elapsed time; the
+backend turns that into `P(AI)` and a verdict (`typed_live` / `mixed` /
+`pasted_block`), shown in the UI as a badge (⌨️ Typed live / 📋 Pasted block).
+
+It is **weak by design** — paste is not proof of AI — so it nudges, never
+dominates (clamped to [0.10, 0.65], weight ≤ 0.25). Demonstration with the
+*same* formal-essay text (LLM reads it as AI, stylo moderate):
+
+| How it was entered | behavior score | `p_ai` | attribution |
+|--------------------|---------------|--------|-------------|
+| **Typed live** (230 keystrokes, 14 corrections, 48 s) | 0.10 | **0.588** | `uncertain` |
+| **Pasted block** (one 210-char paste, 0 keystrokes) | 0.63 | **0.720** | `likely_ai` |
+| **API / curl** (no behavioral data) | n/a | 0.750 | `likely_ai` |
+
+This is also the fix for the most common false positive: clean, carefully *typed*
+human prose used to read as AI on content alone; the typing evidence now pulls it
+back toward human. It still won't claim "human" outright when the content itself
+reads as AI — it correctly lands on `uncertain`, which is the honest answer.
 
 ## Known limitations
 

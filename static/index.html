@@ -49,6 +49,9 @@
   .pill.likely_human { background: #14331c; color: #8ee29f; }
   .pill.uncertain { background: #3a2f12; color: #e8c878; }
   .pill.under_review { background: #1d2c3a; color: #8ec5f4; }
+  .pill.typed_live { background: #14331c; color: #8ee29f; }
+  .pill.pasted_block { background: #3a2f12; color: #e8c878; }
+  .pill.mixed { background: #2a2f3a; color: #b9c2d0; }
   .row { display: flex; gap: 10px; align-items: center; }
   .hidden { display: none; }
   details summary { cursor: pointer; color: var(--muted); margin-top: 12px; font-size: 13px; }
@@ -79,6 +82,8 @@
         <span>p(AI): <b id="paiVal"></b></span>
         <span>LLM: <b id="llmVal"></b></span>
         <span>Stylometry: <b id="styloVal"></b></span>
+        <span>Provenance: <b id="behVal"></b></span>
+        <span id="provPill" class="pill"></span>
       </div>
       <details>
         <summary>Raw signal detail</summary>
@@ -116,6 +121,41 @@ const $ = id => document.getElementById(id);
 let currentId = null;
 const COLOR = { likely_ai: "var(--ai)", likely_human: "var(--human)", uncertain: "var(--uncertain)" };
 
+// ---- input provenance tracking (signal 3) ----------------------------------
+let beh = { keystrokes: 0, backspaces: 0, pasted_chars: 0, paste_count: 0,
+            max_paste_len: 0, firstT: 0, lastT: 0 };
+function resetBeh() { beh = { keystrokes: 0, backspaces: 0, pasted_chars: 0,
+            paste_count: 0, max_paste_len: 0, firstT: 0, lastT: 0 }; }
+const textEl = $("text");
+textEl.addEventListener("keydown", e => {
+  const now = Date.now();
+  if (!beh.firstT) beh.firstT = now;
+  beh.lastT = now;
+  if (e.key === "Backspace" || e.key === "Delete") beh.backspaces++;
+  else if (e.key.length === 1) beh.keystrokes++;   // printable char
+});
+textEl.addEventListener("paste", e => {
+  const pasted = (e.clipboardData || window.clipboardData).getData("text") || "";
+  beh.paste_count++;
+  beh.pasted_chars += pasted.length;
+  beh.max_paste_len = Math.max(beh.max_paste_len, pasted.length);
+  beh.lastT = Date.now();
+});
+function snapshotBehavior() {
+  const final_len = textEl.value.length;
+  const pasted = Math.min(beh.pasted_chars, final_len);
+  return {
+    final_len,
+    pasted_chars: pasted,
+    typed_chars: Math.max(final_len - pasted, 0),
+    paste_count: beh.paste_count,
+    max_paste_len: beh.max_paste_len,
+    keystrokes: beh.keystrokes,
+    backspaces: beh.backspaces,
+    duration_ms: beh.firstT ? (beh.lastT - beh.firstT) : 0,
+  };
+}
+
 function showError(msg) { const e = $("error"); e.textContent = msg; e.classList.remove("hidden"); }
 function clearError() { $("error").classList.add("hidden"); }
 
@@ -128,7 +168,7 @@ async function analyze() {
   try {
     const r = await fetch("/submit", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, creator_id }),
+      body: JSON.stringify({ text, creator_id, behavior: snapshotBehavior() }),
     });
     const d = await r.json();
     if (!r.ok) { showError(d.error || (r.status === 429 ? "Rate limit hit — slow down." : "Error")); return; }
@@ -153,6 +193,18 @@ function renderResult(d) {
   const llm = d.signals.llm;
   $("llmVal").textContent = llm.available ? llm.score.toFixed(2) : "n/a";
   $("styloVal").textContent = d.signals.stylometry.score.toFixed(3);
+  const b = d.signals.behavior;
+  const provPill = $("provPill");
+  if (b && b.available) {
+    $("behVal").textContent = b.score.toFixed(3);
+    const labels = { typed_live: "⌨️ Typed live", pasted_block: "📋 Pasted block", mixed: "✏️ Mixed entry" };
+    provPill.textContent = labels[b.verdict] || b.verdict;
+    provPill.className = "pill " + b.verdict;
+  } else {
+    $("behVal").textContent = "n/a";
+    provPill.textContent = "";
+    provPill.className = "pill";
+  }
   $("raw").textContent = JSON.stringify(d.signals, null, 2);
   $("statusPill").textContent = d.status;
   $("statusPill").className = "pill " + d.status;

@@ -120,3 +120,76 @@ def stylo_signal(text):
             "n_sentences": len(sentences),
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Signal 3: input provenance (behavioral) — optional, browser-captured
+# ---------------------------------------------------------------------------
+
+def behavior_signal(behavior):
+    """P(AI) from *how the text entered the box*, not its content.
+
+    Only the web UI can supply this (curl can't), so it is optional. Input is a
+    dict the front-end builds while the creator works:
+        final_len, typed_chars, pasted_chars, paste_count,
+        max_paste_len, keystrokes, backspaces, duration_ms
+
+    Reasoning — and its deliberate limits:
+      * Typed live, over time, with corrections  -> strong human provenance.
+      * Pasted as a finished block               -> WEAK provenance, NOT proof
+        of AI (people paste their own drafts). So a paste only nudges suspicion
+        upward; it can never, alone, force an "AI" verdict. The score is clamped
+        to [0.10, 0.65] for exactly this reason.
+    """
+    if not behavior or not isinstance(behavior, dict):
+        return {"available": False, "score": None}
+
+    final_len = max(int(behavior.get("final_len", 0)), 0)
+    if final_len < 1:
+        return {"available": False, "score": None}
+
+    typed = max(int(behavior.get("typed_chars", 0)), 0)
+    pasted = max(int(behavior.get("pasted_chars", 0)), 0)
+    paste_count = int(behavior.get("paste_count", 0))
+    max_paste = int(behavior.get("max_paste_len", 0))
+    keystrokes = int(behavior.get("keystrokes", 0))
+    backspaces = int(behavior.get("backspaces", 0))
+    duration_ms = int(behavior.get("duration_ms", 0))
+
+    typed_ratio = _clamp(typed / final_len)
+
+    # base: all-typed -> 0.15 (human), all-pasted -> 0.55 (weak provenance)
+    score = 0.55 - 0.40 * typed_ratio
+
+    # a single dominant paste of the whole text -> weaker provenance
+    if final_len and max_paste / final_len > 0.7:
+        score += 0.08
+    # organic editing (real corrections while typing) -> more human
+    if backspaces > 3 and typed_ratio > 0.5:
+        score -= 0.05
+    # plausible human typing cadence present -> more human
+    if keystrokes > 20 and duration_ms > 3000 and typed_ratio > 0.5:
+        score -= 0.05
+
+    score = round(_clamp(score, 0.10, 0.65), 4)
+
+    if typed_ratio >= 0.8:
+        verdict = "typed_live"        # strong human provenance
+    elif typed_ratio <= 0.3:
+        verdict = "pasted_block"      # weak provenance
+    else:
+        verdict = "mixed"
+
+    return {
+        "available": True,
+        "score": score,
+        "verdict": verdict,
+        "metrics": {
+            "typed_ratio": round(typed_ratio, 3),
+            "paste_count": paste_count,
+            "max_paste_len": max_paste,
+            "keystrokes": keystrokes,
+            "backspaces": backspaces,
+            "duration_ms": duration_ms,
+        },
+    }

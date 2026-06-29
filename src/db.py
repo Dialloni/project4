@@ -38,6 +38,7 @@ def init_db():
                 p_ai         REAL NOT NULL,
                 llm_score    REAL,
                 stylo_score  REAL NOT NULL,
+                behavior_score REAL,
                 status       TEXT NOT NULL,
                 created_at   TEXT NOT NULL
             );
@@ -65,10 +66,11 @@ def save_classification(content_id, creator_id, text, result):
         c.execute(
             """INSERT INTO submissions
                (content_id, creator_id, text, attribution, confidence, p_ai,
-                llm_score, stylo_score, status, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                llm_score, stylo_score, behavior_score, status, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (content_id, creator_id, text, result["attribution"], result["confidence"],
-             result["p_ai"], result["llm_score"], result["stylo_score"], "classified", ts),
+             result["p_ai"], result["llm_score"], result["stylo_score"],
+             result.get("behavior_score"), "classified", ts),
         )
         c.execute(
             """INSERT INTO audit_log
