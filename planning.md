@@ -214,5 +214,14 @@ renormalized weighting (`llm 0.50 / stylo 0.25 / behavior 0.25`, see above). It
 gracefully drops out for API callers. Demonstrated: the *same* text scores
 `uncertain` when typed live but `likely_ai` when pasted as a block.
 
-Not started: provenance certificate, analytics dashboard, multi-modal.
+**✅ Provenance certificate (DONE).** A creator earns a **"✓ Verified Human"**
+credential: they request a one-time random phrase, **type it live** (the
+behavioral signal must read `typed_live`, paste is rejected), and the server
+issues an **HMAC-SHA256 certificate** binding `content_id + creator_id +
+issued_at`. It is tamper-evident — `GET /certificate/<id>` recomputes the
+signature and returns `valid: true/false`. Honest scope: proves a human
+completed a live typing attestation for the content, not absolute authorship.
+Routes: `POST /verify/challenge`, `POST /verify/complete`, `GET /certificate/<id>`.
+
+Not started: analytics dashboard, multi-modal.
 *Update this section before starting any of them.*

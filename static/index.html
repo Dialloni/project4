@@ -101,6 +101,21 @@
       <button id="appeal" class="ghost">Submit appeal</button>
       <div id="appealMsg" class="meta"></div>
     </div>
+
+    <div class="card" id="verifyCard">
+      <div class="row" style="justify-content: space-between;">
+        <b>Earn a "Verified Human" credential</b>
+        <span id="certBadge" class="pill typed_live hidden"></span>
+      </div>
+      <p class="sub" style="margin:6px 0 0">Prove a human is present by typing a short phrase live (no pasting).</p>
+      <button id="getChallenge" class="ghost">Start verification</button>
+      <div id="challengeBox" class="hidden">
+        <p style="margin:12px 0 4px">Type this exactly: <b id="phrase" style="letter-spacing:.5px"></b></p>
+        <input id="challengeInput" placeholder="type the phrase here…" autocomplete="off" />
+        <button id="completeVerify">Submit verification</button>
+        <div id="verifyMsg" class="meta"></div>
+      </div>
+    </div>
   </div>
 
   <!-- LOG -->
@@ -210,6 +225,9 @@ function renderResult(d) {
   $("statusPill").className = "pill " + d.status;
   $("appealMsg").textContent = "";
   $("reason").value = "";
+  challengeId = null;
+  $("certBadge").classList.add("hidden");
+  $("challengeBox").classList.add("hidden");
   $("result").classList.remove("hidden");
 }
 
@@ -249,9 +267,77 @@ async function loadLog() {
   } catch (e) { /* ignore */ }
 }
 
+// ---- provenance certificate (verify-human) ---------------------------------
+let challengeId = null;
+let chBeh = { keystrokes: 0, backspaces: 0, pasted: 0, maxPaste: 0, firstT: 0, lastT: 0 };
+function resetChBeh() { chBeh = { keystrokes: 0, backspaces: 0, pasted: 0, maxPaste: 0, firstT: 0, lastT: 0 }; }
+const chEl = $("challengeInput");
+chEl.addEventListener("keydown", e => {
+  const now = Date.now();
+  if (!chBeh.firstT) chBeh.firstT = now;
+  chBeh.lastT = now;
+  if (e.key === "Backspace" || e.key === "Delete") chBeh.backspaces++;
+  else if (e.key.length === 1) chBeh.keystrokes++;
+});
+chEl.addEventListener("paste", e => {
+  const p = (e.clipboardData || window.clipboardData).getData("text") || "";
+  chBeh.pasted += p.length; chBeh.maxPaste = Math.max(chBeh.maxPaste, p.length); chBeh.lastT = Date.now();
+});
+function chSnapshot() {
+  const final_len = chEl.value.length;
+  const pasted = Math.min(chBeh.pasted, final_len);
+  return { final_len, pasted_chars: pasted, typed_chars: Math.max(final_len - pasted, 0),
+    paste_count: chBeh.maxPaste ? 1 : 0, max_paste_len: chBeh.maxPaste,
+    keystrokes: chBeh.keystrokes, backspaces: chBeh.backspaces,
+    duration_ms: chBeh.firstT ? (chBeh.lastT - chBeh.firstT) : 0 };
+}
+
+async function getChallenge() {
+  clearError();
+  const creator_id = $("creator").value.trim();
+  try {
+    const r = await fetch("/verify/challenge", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ creator_id }),
+    });
+    const d = await r.json();
+    if (!r.ok) { showError(d.error || "Could not start verification"); return; }
+    challengeId = d.challenge_id;
+    $("phrase").textContent = d.phrase;
+    $("challengeBox").classList.remove("hidden");
+    $("verifyMsg").textContent = "";
+    chEl.value = ""; resetChBeh(); chEl.focus();
+  } catch (e) { showError("Network error: " + e.message); }
+}
+
+async function completeVerify() {
+  if (!currentId || !challengeId) return;
+  try {
+    const r = await fetch("/verify/complete", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ challenge_id: challengeId, content_id: currentId,
+        typed_phrase: chEl.value, behavior: chSnapshot() }),
+    });
+    const d = await r.json();
+    if (d.verified) {
+      const badge = $("certBadge");
+      badge.textContent = "✓ Verified Human · " + d.certificate.cert_id.slice(0, 8);
+      badge.classList.remove("hidden");
+      $("challengeBox").classList.add("hidden");
+      $("statusPill").textContent = "verified_human";
+      $("statusPill").className = "pill typed_live";
+      loadLog();
+    } else {
+      $("verifyMsg").innerHTML = "<span style='color:var(--ai)'>" + (d.reason || d.error || "Verification failed") + "</span>";
+    }
+  } catch (e) { showError("Network error: " + e.message); }
+}
+
 $("analyze").onclick = analyze;
 $("appeal").onclick = appeal;
 $("refresh").onclick = loadLog;
+$("getChallenge").onclick = getChallenge;
+$("completeVerify").onclick = completeVerify;
 loadLog();
 </script>
 </body>

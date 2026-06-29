@@ -47,6 +47,9 @@ python -m tests.test_pipeline
 | POST | `/submit` | `{text, creator_id}` | `content_id`, `attribution`, `confidence`, `p_ai`, per-signal `signals`, `label`, `status` |
 | POST | `/appeal` | `{content_id, creator_reasoning}` | confirmation + `status: under_review` + original decision |
 | GET | `/log?limit=N` | — | recent structured audit entries |
+| POST | `/verify/challenge` | `{creator_id}` | one-time phrase to type live |
+| POST | `/verify/complete` | `{challenge_id, content_id, typed_phrase, behavior}` | issues a signed certificate |
+| GET | `/certificate/<content_id>` | — | fetch + cryptographically verify a certificate |
 | GET | `/health` | — | liveness |
 
 ```bash
@@ -257,6 +260,33 @@ This is also the fix for the most common false positive: clean, carefully *typed
 human prose used to read as AI on content alone; the typing evidence now pulls it
 back toward human. It still won't claim "human" outright when the content itself
 reads as AI — it correctly lands on `uncertain`, which is the honest answer.
+
+## Stretch implemented — Provenance certificate ("Verified Human")
+
+Because you **cannot trace plain text's origin after the fact**, the only honest
+way to give readers certainty is capture-time provenance. A creator earns a
+**✓ Verified Human** credential:
+
+1. `POST /verify/challenge` → server returns a one-time random phrase.
+2. The creator **types it live** in the UI. `POST /verify/complete` checks the
+   phrase matches **and** that the behavioral signal reads `typed_live` — a
+   pasted phrase is rejected (422).
+3. The server issues an **HMAC-SHA256 certificate** binding
+   `content_id + creator_id + issued_at`. `GET /certificate/<id>` recomputes the
+   signature and returns `valid: true/false`, so it is **tamper-evident** —
+   changing any field invalidates it (verified in a unit check).
+
+```
+typed challenge -> { "verified": true, "certificate": { "cert_id": "b7417f69…",
+                     "badge": "✓ Verified Human", "method": "typed_challenge" } }
+pasted phrase   -> { "verified": false, "reason": "challenge must be typed live, not pasted" }
+GET /certificate/<id> -> { "has_certificate": true, "valid": true, "badge": "✓ Verified Human" }
+```
+
+**Honest scope:** this proves a human completed a live typing attestation for the
+content — not absolute authorship. It is far stronger than statistical detection
+(which is why "uncertain" is the right answer without it), but not DRM. The
+signing key comes from `PROVENANCE_SECRET` (set a long random value in prod).
 
 ## Known limitations
 

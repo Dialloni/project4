@@ -55,6 +55,21 @@ def init_db():
                 status       TEXT,
                 detail       TEXT
             );
+            CREATE TABLE IF NOT EXISTS challenges (
+                challenge_id TEXT PRIMARY KEY,
+                creator_id   TEXT NOT NULL,
+                phrase       TEXT NOT NULL,
+                created_at   TEXT NOT NULL,
+                used         INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS certificates (
+                content_id   TEXT PRIMARY KEY,
+                cert_id      TEXT NOT NULL,
+                creator_id   TEXT NOT NULL,
+                issued_at    TEXT NOT NULL,
+                method       TEXT NOT NULL,
+                signature    TEXT NOT NULL
+            );
             """
         )
 
@@ -124,3 +139,49 @@ def get_log(limit=50):
         d["detail"] = json.loads(d["detail"]) if d["detail"] else {}
         out.append(d)
     return out
+
+
+# --- provenance certificate (stretch) --------------------------------------
+
+def create_challenge(challenge_id, creator_id, phrase):
+    with _conn() as c:
+        c.execute(
+            "INSERT INTO challenges (challenge_id, creator_id, phrase, created_at, used) VALUES (?,?,?,?,0)",
+            (challenge_id, creator_id, phrase, _now()),
+        )
+
+
+def get_challenge(challenge_id):
+    with _conn() as c:
+        row = c.execute("SELECT * FROM challenges WHERE challenge_id=?", (challenge_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def mark_challenge_used(challenge_id):
+    with _conn() as c:
+        c.execute("UPDATE challenges SET used=1 WHERE challenge_id=?", (challenge_id,))
+
+
+def save_certificate(content_id, cert_id, creator_id, issued_at, method, signature):
+    """Persist a certificate, mark the submission verified, and audit it."""
+    with _conn() as c:
+        c.execute(
+            """INSERT OR REPLACE INTO certificates
+               (content_id, cert_id, creator_id, issued_at, method, signature)
+               VALUES (?,?,?,?,?,?)""",
+            (content_id, cert_id, creator_id, issued_at, method, signature),
+        )
+        c.execute("UPDATE submissions SET status='verified_human' WHERE content_id=?", (content_id,))
+        c.execute(
+            """INSERT INTO audit_log
+               (content_id, creator_id, event_type, timestamp, status, detail)
+               VALUES (?,?,?,?,?,?)""",
+            (content_id, creator_id, "certificate_issued", issued_at, "verified_human",
+             json.dumps({"cert_id": cert_id, "method": method})),
+        )
+
+
+def get_certificate(content_id):
+    with _conn() as c:
+        row = c.execute("SELECT * FROM certificates WHERE content_id=?", (content_id,)).fetchone()
+        return dict(row) if row else None
