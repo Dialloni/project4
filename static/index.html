@@ -256,6 +256,10 @@ async function loadLog() {
   try {
     const r = await fetch("/log?limit=10");
     const d = await r.json();
+    if (!d.entries.length) {
+      $("logBody").innerHTML = `<tr><td colspan="5" style="color:var(--muted)">No entries yet — analyze something above.</td></tr>`;
+      return;
+    }
     $("logBody").innerHTML = d.entries.map(e => `
       <tr>
         <td>${(e.timestamp || "").slice(11, 19)}</td>
@@ -264,7 +268,9 @@ async function loadLog() {
         <td>${e.confidence != null ? Math.round(e.confidence * 100) + "%" : "—"}</td>
         <td>${e.status || "—"}</td>
       </tr>`).join("");
-  } catch (e) { /* ignore */ }
+  } catch (e) {
+    $("logBody").innerHTML = `<tr><td colspan="5" style="color:var(--ai)">⚠ Can't reach server — is it running on port 5001?</td></tr>`;
+  }
 }
 
 // ---- provenance certificate (verify-human) ---------------------------------
