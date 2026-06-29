@@ -12,7 +12,7 @@ import os
 import uuid
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
@@ -35,6 +35,12 @@ limiter = Limiter(
 )
 
 MAX_TEXT_CHARS = 20000
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
+
+
+@app.route("/", methods=["GET"])
+def index():
+    return send_from_directory(STATIC_DIR, "index.html")
 
 
 @app.route("/health", methods=["GET"])

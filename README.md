@@ -28,6 +28,12 @@ cp .env.example .env               # add your GROQ_API_KEY
 PORT=5001 python -m src.app        # port 5001 avoids macOS AirPlay on 5000
 ```
 
+Then open **http://localhost:5001/** for the web UI: paste text → Analyze →
+color-coded transparency label (red AI / green human / amber uncertain) with a
+confidence bar and per-signal breakdown, an appeal box, and a live audit-log
+table. The UI is a single vanilla-JS page ([static/index.html](static/index.html))
+served same-origin by Flask — no build step, no framework.
+
 Offline self-check (no API key needed — runs the stylometry-only path):
 
 ```bash

@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Provenance Guard</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #181b22; --line: #2a2f3a; --text: #e6e8ee;
+    --muted: #9aa3b2; --ai: #e5534b; --human: #3fb950; --uncertain: #d29922;
+    --accent: #4c8dff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 -apple-system, Segoe UI, Roboto, sans-serif;
+         background: var(--bg); color: var(--text); }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 80px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+  textarea, input {
+    width: 100%; background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font: inherit;
+  }
+  textarea { min-height: 150px; resize: vertical; }
+  button {
+    margin-top: 16px; background: var(--accent); color: #fff; border: 0;
+    border-radius: 8px; padding: 10px 18px; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+          padding: 18px; margin-top: 22px; }
+  .label { border-left: 5px solid var(--uncertain); }
+  .label.likely_ai { border-left-color: var(--ai); }
+  .label.likely_human { border-left-color: var(--human); }
+  .label.uncertain { border-left-color: var(--uncertain); }
+  .label h2 { margin: 0 0 6px; font-size: 18px; }
+  .label p { margin: 0; color: var(--muted); }
+  .bar { height: 10px; background: #222732; border-radius: 6px; overflow: hidden; margin: 14px 0 6px; }
+  .bar > span { display: block; height: 100%; }
+  .meta { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-top: 10px; }
+  .meta b { color: var(--text); }
+  .err { color: var(--ai); margin-top: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; }
+  .pill { padding: 2px 8px; border-radius: 99px; font-size: 12px; }
+  .pill.likely_ai { background: #3a1d1c; color: #f4a7a3; }
+  .pill.likely_human { background: #14331c; color: #8ee29f; }
+  .pill.uncertain { background: #3a2f12; color: #e8c878; }
+  .pill.under_review { background: #1d2c3a; color: #8ec5f4; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  .hidden { display: none; }
+  details summary { cursor: pointer; color: var(--muted); margin-top: 12px; font-size: 13px; }
+  pre { background: #11141a; border: 1px solid var(--line); border-radius: 8px;
+        padding: 10px; overflow: auto; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🛡️ Provenance Guard</h1>
+  <p class="sub">Paste creative text. See how it's attributed — and appeal if we got it wrong.</p>
+
+  <label for="creator">Creator ID</label>
+  <input id="creator" value="demo-user" />
+  <label for="text">Content</label>
+  <textarea id="text" placeholder="Paste a poem, story excerpt, or blog post…"></textarea>
+  <button id="analyze">Analyze</button>
+  <div id="error" class="err hidden"></div>
+
+  <!-- RESULT -->
+  <div id="result" class="hidden">
+    <div id="labelCard" class="card label">
+      <h2 id="labelTitle"></h2>
+      <p id="labelBody"></p>
+      <div class="bar"><span id="confBar"></span></div>
+      <div class="meta">
+        <span>Confidence: <b id="confVal"></b></span>
+        <span>p(AI): <b id="paiVal"></b></span>
+        <span>LLM: <b id="llmVal"></b></span>
+        <span>Stylometry: <b id="styloVal"></b></span>
+      </div>
+      <details>
+        <summary>Raw signal detail</summary>
+        <pre id="raw"></pre>
+      </details>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content: space-between;">
+        <b>Disagree with this result?</b>
+        <span class="pill" id="statusPill">classified</span>
+      </div>
+      <label for="reason">Your reasoning (appeal)</label>
+      <textarea id="reason" style="min-height:70px" placeholder="e.g. I wrote this myself from personal experience."></textarea>
+      <button id="appeal" class="ghost">Submit appeal</button>
+      <div id="appealMsg" class="meta"></div>
+    </div>
+  </div>
+
+  <!-- LOG -->
+  <div class="card">
+    <div class="row" style="justify-content: space-between;">
+      <b>Audit log</b>
+      <button id="refresh" class="ghost" style="margin:0;padding:6px 12px;">Refresh</button>
+    </div>
+    <table>
+      <thead><tr><th>Time</th><th>Event</th><th>Attribution</th><th>Conf</th><th>Status</th></tr></thead>
+      <tbody id="logBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let currentId = null;
+const COLOR = { likely_ai: "var(--ai)", likely_human: "var(--human)", uncertain: "var(--uncertain)" };
+
+function showError(msg) { const e = $("error"); e.textContent = msg; e.classList.remove("hidden"); }
+function clearError() { $("error").classList.add("hidden"); }
+
+async function analyze() {
+  clearError();
+  const text = $("text").value.trim();
+  const creator_id = $("creator").value.trim();
+  if (!text) return showError("Enter some text first.");
+  $("analyze").disabled = true;
+  try {
+    const r = await fetch("/submit", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, creator_id }),
+    });
+    const d = await r.json();
+    if (!r.ok) { showError(d.error || (r.status === 429 ? "Rate limit hit — slow down." : "Error")); return; }
+    renderResult(d);
+    loadLog();
+  } catch (e) { showError("Network error: " + e.message); }
+  finally { $("analyze").disabled = false; }
+}
+
+function renderResult(d) {
+  currentId = d.content_id;
+  const card = $("labelCard");
+  card.className = "card label " + d.attribution;
+  $("labelTitle").textContent = d.label.title;
+  $("labelBody").textContent = d.label.body;
+  const pct = Math.round(d.confidence * 100);
+  const bar = $("confBar");
+  bar.style.width = pct + "%";
+  bar.style.background = COLOR[d.attribution] || "var(--uncertain)";
+  $("confVal").textContent = pct + "%";
+  $("paiVal").textContent = d.p_ai.toFixed(3);
+  const llm = d.signals.llm;
+  $("llmVal").textContent = llm.available ? llm.score.toFixed(2) : "n/a";
+  $("styloVal").textContent = d.signals.stylometry.score.toFixed(3);
+  $("raw").textContent = JSON.stringify(d.signals, null, 2);
+  $("statusPill").textContent = d.status;
+  $("statusPill").className = "pill " + d.status;
+  $("appealMsg").textContent = "";
+  $("reason").value = "";
+  $("result").classList.remove("hidden");
+}
+
+async function appeal() {
+  if (!currentId) return;
+  const reason = $("reason").value.trim();
+  if (!reason) return showError("Enter your appeal reasoning.");
+  clearError();
+  $("appeal").disabled = true;
+  try {
+    const r = await fetch("/appeal", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content_id: currentId, creator_reasoning: reason }),
+    });
+    const d = await r.json();
+    if (!r.ok) { showError(d.error || "Appeal failed"); return; }
+    $("appealMsg").innerHTML = "<span>" + d.message + "</span>";
+    $("statusPill").textContent = "under_review";
+    $("statusPill").className = "pill under_review";
+    loadLog();
+  } catch (e) { showError("Network error: " + e.message); }
+  finally { $("appeal").disabled = false; }
+}
+
+async function loadLog() {
+  try {
+    const r = await fetch("/log?limit=10");
+    const d = await r.json();
+    $("logBody").innerHTML = d.entries.map(e => `
+      <tr>
+        <td>${(e.timestamp || "").slice(11, 19)}</td>
+        <td>${e.event_type}</td>
+        <td>${e.attribution ? `<span class="pill ${e.attribution}">${e.attribution}</span>` : "—"}</td>
+        <td>${e.confidence != null ? Math.round(e.confidence * 100) + "%" : "—"}</td>
+        <td>${e.status || "—"}</td>
+      </tr>`).join("");
+  } catch (e) { /* ignore */ }
+}
+
+$("analyze").onclick = analyze;
+$("appeal").onclick = appeal;
+$("refresh").onclick = loadLog;
+loadLog();
+</script>
+</body>
+</html>
