@@ -22,8 +22,8 @@ from flask_limiter.util import get_remote_address
 
 from . import db, provenance
 from .labels import build_label
-from .scoring import combine
-from .signals import behavior_signal, llm_signal, stylo_signal
+from .scoring import combine, combine_metadata
+from .signals import behavior_signal, llm_signal, metadata_signal, stylo_signal
 
 load_dotenv()
 
@@ -56,29 +56,41 @@ def health():
 @limiter.limit("10 per minute;100 per day")
 def submit():
     data = request.get_json(silent=True) or {}
-    text = data.get("text")
     creator_id = data.get("creator_id")
+    content_type = data.get("content_type", "text")
 
-    # validate at the trust boundary
-    if not isinstance(text, str) or not text.strip():
-        return jsonify({"error": "text is required and must be a non-empty string"}), 400
     if not isinstance(creator_id, str) or not creator_id.strip():
         return jsonify({"error": "creator_id is required and must be a non-empty string"}), 400
-    if len(text) > MAX_TEXT_CHARS:
-        return jsonify({"error": f"text exceeds {MAX_TEXT_CHARS} characters"}), 413
+    if content_type not in ("text", "image_metadata"):
+        return jsonify({"error": "content_type must be 'text' or 'image_metadata'"}), 400
 
-    llm = llm_signal(text)
-    stylo = stylo_signal(text)
-    behavior = behavior_signal(data.get("behavior"))  # optional, browser-only
-    result = combine(llm, stylo, behavior)
+    if content_type == "image_metadata":
+        # Multi-modal path: classify an image from its metadata, not pixels.
+        meta = data.get("metadata")
+        if not isinstance(meta, dict) or not meta:
+            return jsonify({"error": "metadata object is required for image_metadata"}), 400
+        result = combine_metadata(metadata_signal(meta))
+        stored_text = data.get("text") or meta.get("filename") or "(image)"
+    else:
+        text = data.get("text")
+        if not isinstance(text, str) or not text.strip():
+            return jsonify({"error": "text is required and must be a non-empty string"}), 400
+        if len(text) > MAX_TEXT_CHARS:
+            return jsonify({"error": f"text exceeds {MAX_TEXT_CHARS} characters"}), 413
+        llm = llm_signal(text)
+        stylo = stylo_signal(text)
+        behavior = behavior_signal(data.get("behavior"))  # optional, browser-only
+        result = combine(llm, stylo, behavior)
+        stored_text = text
+
     label = build_label(result)
-
     content_id = str(uuid.uuid4())
-    db.save_classification(content_id, creator_id, text, result)
+    db.save_classification(content_id, creator_id, stored_text, result, content_type)
 
     return jsonify({
         "content_id": content_id,
         "creator_id": creator_id,
+        "content_type": content_type,
         "attribution": result["attribution"],
         "confidence": result["confidence"],
         "p_ai": result["p_ai"],
@@ -198,6 +210,29 @@ def certificate(content_id):
         "issued_at": cert["issued_at"],
         "method": cert["method"],
     })
+
+
+@app.route("/analytics", methods=["GET"])
+def analytics():
+    return jsonify(db.get_analytics())
+
+
+@app.route("/log.csv", methods=["GET"])
+def log_csv():
+    import csv
+    import io
+    rows = db.get_log(request.args.get("limit", default=500, type=int))
+    buf = io.StringIO()
+    cols = ["id", "timestamp", "event_type", "content_id", "creator_id",
+            "attribution", "confidence", "llm_score", "stylo_score", "status"]
+    w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+    w.writeheader()
+    for r in rows:
+        w.writerow(r)
+    return app.response_class(
+        buf.getvalue(), mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=audit_log.csv"},
+    )
 
 
 @app.route("/log", methods=["GET"])

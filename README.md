@@ -288,6 +288,41 @@ content — not absolute authorship. It is far stronger than statistical detecti
 (which is why "uncertain" is the right answer without it), but not DRM. The
 signing key comes from `PROVENANCE_SECRET` (set a long random value in prod).
 
+## Stretch implemented — Multi-modal (image metadata)
+
+A second content type rides the same pipeline. `POST /submit` with
+`content_type:"image_metadata"` and a `metadata` object classifies an **image
+from its metadata** (not pixels) via `metadata_signal()`:
+
+| Metadata | Verdict | `p_ai` |
+|----------|---------|--------|
+| `software:"Midjourney v6"` / DALL·E / SD / C2PA "ai generated" | `ai_tool_tagged` | 0.92 |
+| `camera_make:"Canon"`, `camera_model:"EOS R5"`, `has_exif:true` | `camera_capture` | 0.10 |
+| no EXIF, no camera (stripped) | `metadata_stripped` | 0.50 (uncertain) |
+
+*Honest limit:* metadata is trivially editable — absence proves nothing and a
+tag can be forged — so it's treated as one signal, not proof. The UI has a
+**Text / Image-metadata toggle**.
+
+## Stretch implemented — Analytics dashboard
+
+`GET /analytics` aggregates live from the database and the UI renders it as stat
+cards + distribution bars:
+
+- total submissions, **attribution distribution** (AI / uncertain / human)
+- **appeal rate**, certificates issued, average confidence
+- **signal-disagreement rate** — share of text rows where the LLM and stylometry
+  diverge by >0.3 (a health metric for the ensemble)
+- breakdown by content type
+
+The audit log has an **Export CSV** button (`GET /log.csv`).
+
+## UI polish
+
+History-friendly touches: content-type toggle, a loading state on Analyze,
+local-time rendering of UTC timestamps (hover shows the raw UTC), clear
+empty/offline states on the log, and color-coded label + provenance badges.
+
 ## Known limitations
 
 - **Very short text is mislabeled as AI.** A single sentence has no

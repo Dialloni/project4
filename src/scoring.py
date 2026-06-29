@@ -73,3 +73,37 @@ def combine(llm, stylo, behavior=None):
             ),
         },
     }
+
+
+def combine_metadata(meta_signal):
+    """Verdict for the IMAGE modality from the single metadata signal.
+
+    Same output shape as combine() so the label builder, DB, and audit log work
+    unchanged. Uses the same asymmetric thresholds.
+    """
+    if not meta_signal.get("available"):
+        # no metadata -> honest uncertain, neutral score
+        p_ai = 0.5
+        sig = {"available": False, "score": None}
+    else:
+        p_ai = round(meta_signal["score"], 4)
+        sig = {"available": True, "score": meta_signal["score"],
+               "verdict": meta_signal["verdict"], "metrics": meta_signal["metrics"]}
+
+    if p_ai >= AI_THRESHOLD:
+        attribution = "likely_ai"
+    elif p_ai <= HUMAN_THRESHOLD:
+        attribution = "likely_human"
+    else:
+        attribution = "uncertain"
+
+    return {
+        "attribution": attribution,
+        "confidence": round(max(p_ai, 1 - p_ai), 4),
+        "p_ai": p_ai,
+        "llm_score": None,
+        "stylo_score": None,
+        "behavior_score": None,
+        "weights_used": {"image_metadata": 1.0},
+        "signals": {"image_metadata": sig},
+    }

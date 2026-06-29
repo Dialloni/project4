@@ -223,5 +223,15 @@ signature and returns `valid: true/false`. Honest scope: proves a human
 completed a live typing attestation for the content, not absolute authorship.
 Routes: `POST /verify/challenge`, `POST /verify/complete`, `GET /certificate/<id>`.
 
-Not started: analytics dashboard, multi-modal.
-*Update this section before starting any of them.*
+**✅ Analytics dashboard (DONE).** `GET /analytics` aggregates live from the DB:
+totals, attribution distribution, **appeal rate**, certificates issued, average
+confidence, and **signal-disagreement rate** (text rows where |llm−stylo|>0.3).
+The UI renders stat cards + distribution bars + a CSV export of the audit log.
+
+**✅ Multi-modal (DONE).** Second content type `image_metadata`: `POST /submit`
+with `content_type:"image_metadata"` + a `metadata` object (software/C2PA,
+camera make/model, EXIF). `metadata_signal()` scores it — AI-tool tag → ~0.92,
+real camera + EXIF → ~0.10, stripped metadata → 0.50 (honest uncertain). Same
+label/audit/appeal plumbing; the UI has a Text / Image-metadata toggle.
+
+All four stretch goals complete (ensemble, certificate, analytics, multi-modal).

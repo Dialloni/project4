@@ -193,3 +193,57 @@ def behavior_signal(behavior):
             "duration_ms": duration_ms,
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Multi-modal: image-metadata signal (second content type)
+# ---------------------------------------------------------------------------
+
+# Markers AI image generators leave in EXIF/XMP/C2PA "software" or provenance.
+_AI_TOOL_MARKERS = (
+    "dall-e", "dalle", "midjourney", "niji", "stable diffusion", "sdxl", "sd ",
+    "comfyui", "automatic1111", "firefly", "adobe firefly", "leonardo", "ideogram",
+    "flux", "dreamstudio", "gpt-4o", "gemini", "imagen", "runway", "ai generated",
+)
+
+
+def metadata_signal(meta):
+    """P(AI) for an IMAGE based on its metadata, not pixels.
+
+    `meta` is a dict the caller extracts from the file's EXIF/XMP/C2PA, e.g.
+        {software, camera_make, camera_model, has_exif, c2pa}
+
+    Reasoning:
+      * A known AI generator named in software/C2PA  -> strong AI evidence.
+      * A real camera make/model + intact EXIF        -> strong human-capture.
+      * Stripped metadata (no EXIF, no camera)        -> unknown; screenshots and
+        re-exports also strip EXIF, so this is honestly uncertain.
+    Limits: metadata is trivially editable — absence proves nothing, and a
+    determined faker can forge a camera tag. Treated as one signal, not proof.
+    """
+    if not meta or not isinstance(meta, dict):
+        return {"available": False, "score": None}
+
+    software = str(meta.get("software", "")).lower()
+    c2pa = str(meta.get("c2pa", "")).lower()
+    make = str(meta.get("camera_make", "")).strip()
+    model = str(meta.get("camera_model", "")).strip()
+    has_exif = bool(meta.get("has_exif", bool(make or model)))
+
+    blob = software + " " + c2pa
+    if any(m in blob for m in _AI_TOOL_MARKERS):
+        score, verdict = 0.92, "ai_tool_tagged"
+    elif (make or model) and has_exif:
+        score, verdict = 0.10, "camera_capture"
+    elif not has_exif and not make and not model:
+        score, verdict = 0.50, "metadata_stripped"
+    else:
+        score, verdict = 0.45, "inconclusive"
+
+    return {
+        "available": True,
+        "score": score,
+        "verdict": verdict,
+        "metrics": {"software": software or None, "camera": (make + " " + model).strip() or None,
+                    "has_exif": has_exif, "c2pa": c2pa or None},
+    }

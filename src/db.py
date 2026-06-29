@@ -37,8 +37,9 @@ def init_db():
                 confidence   REAL NOT NULL,
                 p_ai         REAL NOT NULL,
                 llm_score    REAL,
-                stylo_score  REAL NOT NULL,
+                stylo_score  REAL,
                 behavior_score REAL,
+                content_type TEXT NOT NULL DEFAULT 'text',
                 status       TEXT NOT NULL,
                 created_at   TEXT NOT NULL
             );
@@ -74,18 +75,18 @@ def init_db():
         )
 
 
-def save_classification(content_id, creator_id, text, result):
+def save_classification(content_id, creator_id, text, result, content_type="text"):
     """Persist a new submission and write its audit entry."""
     ts = _now()
     with _conn() as c:
         c.execute(
             """INSERT INTO submissions
                (content_id, creator_id, text, attribution, confidence, p_ai,
-                llm_score, stylo_score, behavior_score, status, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                llm_score, stylo_score, behavior_score, content_type, status, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (content_id, creator_id, text, result["attribution"], result["confidence"],
-             result["p_ai"], result["llm_score"], result["stylo_score"],
-             result.get("behavior_score"), "classified", ts),
+             result["p_ai"], result.get("llm_score"), result.get("stylo_score"),
+             result.get("behavior_score"), content_type, "classified", ts),
         )
         c.execute(
             """INSERT INTO audit_log
@@ -185,3 +186,38 @@ def get_certificate(content_id):
     with _conn() as c:
         row = c.execute("SELECT * FROM certificates WHERE content_id=?", (content_id,)).fetchone()
         return dict(row) if row else None
+
+
+# --- analytics (stretch) ----------------------------------------------------
+
+def get_analytics():
+    """Aggregate metrics for the dashboard, computed live from the tables."""
+    with _conn() as c:
+        total = c.execute("SELECT COUNT(*) FROM submissions").fetchone()[0]
+        by_attr = dict(c.execute(
+            "SELECT attribution, COUNT(*) FROM submissions GROUP BY attribution").fetchall())
+        by_type = dict(c.execute(
+            "SELECT content_type, COUNT(*) FROM submissions GROUP BY content_type").fetchall())
+        appeals = c.execute(
+            "SELECT COUNT(*) FROM audit_log WHERE event_type='appeal'").fetchone()[0]
+        certs = c.execute("SELECT COUNT(*) FROM certificates").fetchone()[0]
+        avg_conf = c.execute("SELECT AVG(confidence) FROM submissions").fetchone()[0]
+        # signal disagreement: text rows where |llm - stylo| > 0.3
+        disagree = c.execute(
+            """SELECT COUNT(*) FROM submissions
+               WHERE llm_score IS NOT NULL AND stylo_score IS NOT NULL
+                 AND ABS(llm_score - stylo_score) > 0.3""").fetchone()[0]
+        text_rows = c.execute(
+            "SELECT COUNT(*) FROM submissions WHERE llm_score IS NOT NULL AND stylo_score IS NOT NULL").fetchone()[0]
+
+    return {
+        "total_submissions": total,
+        "by_attribution": {k: by_attr.get(k, 0) for k in ("likely_ai", "uncertain", "likely_human")},
+        "by_content_type": by_type,
+        "appeals": appeals,
+        "appeal_rate": round(appeals / total, 3) if total else 0,
+        "certificates_issued": certs,
+        "avg_confidence": round(avg_conf, 3) if avg_conf else 0,
+        "signal_disagreements": disagree,
+        "signal_disagreement_rate": round(disagree / text_rows, 3) if text_rows else 0,
+    }
