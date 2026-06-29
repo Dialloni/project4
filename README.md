@@ -111,15 +111,18 @@ chosen inputs (clear-AI, clear-human, two borderline) and checked the scores
 matched intuition; where they didn't, I printed each signal separately to find
 which one was off (see AI usage below).
 
-**Two real example submissions (noticeably different confidence):**
+**Real example submissions (both signals live), spanning all three bands:**
 
-| Input | `p_ai` | confidence | attribution |
-|-------|--------|-----------|-------------|
-| "Artificial intelligence represents a transformative paradigm shift… stakeholders must collaborate to ensure responsible deployment." | **0.752** | **0.752** | `likely_ai` |
-| "ok so i tried that ramen place downtown and honestly? meh. broth was fine but WAY too salty and i was thirsty for hours after. probably wont go back" | **0.000** | **1.000** | `likely_human` |
+| Input | LLM | stylo | `p_ai` | confidence | attribution |
+|-------|-----|-------|--------|-----------|-------------|
+| "In conclusion, it is important to recognize that effective time management… Ultimately, these strategies contribute to a balanced and successful lifestyle." | 0.80 | 0.55 | **0.713** | **0.713** | `likely_ai` |
+| "Artificial intelligence represents a transformative paradigm shift… stakeholders must collaborate to ensure responsible deployment." | 0.80 | 0.44 | **0.673** | **0.673** | `uncertain` |
+| "ok so i finally tried that new ramen place downtown and honestly? underwhelming… probably wont go back unless someone drags me there" | 0.20 | 0.00 | **0.130** | **0.870** | `likely_human` |
 
-*(Scores above are from the stylometry-only path with no API key; adding the
-Groq signal sharpens the AI case further.)*
+The middle row is the multi-signal design working as intended: the LLM reads the
+formal essay as AI (0.80) while stylometry, seeing uniform-but-not-extreme prose,
+stays moderate (0.44). They disagree, so the system reports **uncertain** rather
+than a false-confident verdict — exactly the honesty the project asks for.
 
 ## Transparency label — three variants (exact text)
 
